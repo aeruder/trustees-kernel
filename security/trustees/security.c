@@ -134,7 +134,9 @@ static inline struct dentry *find_inode_dentry(struct inode *inode,
 
 /*
  * Return 1 if they are under the same set of trustees
- * otherwise return 0.
+ * otherwise return 0.  In the case that we are handling
+ * a directory, we also check to see if there are subdirectories
+ * with trustees.
  */
 static inline int have_same_trustees(struct dentry *old_dentry,
 				     struct dentry *new_dentry)
@@ -173,6 +175,10 @@ static inline int have_same_trustees(struct dentry *old_dentry,
 		     &new_deep);
 	if (old_deep == new_deep) {
 		ret = 1;
+		if (is_dir) {
+			if (trustee_has_child(mnt, old_file_name) ||
+				trustee_has_child(mnt, new_file_name)) ret = 0;
+		}
 	}
 	read_unlock(&trustee_hash_lock);
 
@@ -369,7 +375,7 @@ static int trustees_inode_link(struct dentry *old_dentry,
  *   1. Any file or directory that is affected by different trustees at its
  *      old location than at its new location.
  *   2. In the case of a directory, we should protect against moving a directory
- *      that has trustees set inside of it.  *TODO*
+ *      that has trustees set inside of it.
  *
  * In any case above, we return -EXDEV which signifies to the calling program that
  * the files are on different devices, and assuming the program is written correctly

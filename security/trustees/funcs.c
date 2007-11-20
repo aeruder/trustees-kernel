@@ -544,6 +544,57 @@ static int get_trustee_mask_for_name(struct trustee_name *name,
 }
 
 /*
+ * Return non-zero if a trustee exists in a subpath.
+ *
+ * WARNING!
+ * This function requires that you lock/unlock the trustees_hash_lock
+ */
+int trustee_has_child(struct vfsmount *mnt, char *file_name)
+{
+	struct trustee_name trustee_name;
+	char tempchar;
+	unsigned ignore_case = 0;
+	struct trustee_hash_element *root;
+	size_t len;
+	struct trustee_ic *iter;
+	struct trustee_hash_element *r;
+
+	if (!file_name || !*file_name) return 0;
+
+	list_for_each_entry(iter, &trustee_ic_list, ic_list) {
+		if (trustee_dev_cmp
+		    (iter->dev, trustee_name.dev, iter->devname,
+		     trustee_name.devname)) {
+			ignore_case = 1;
+			break;
+		}
+	}
+
+	trustee_name.dev = mnt->mnt_sb->s_dev;
+	trustee_name.devname = mnt->mnt_devname;
+	trustee_name.filename = file_name;
+	tempchar = file_name[1];
+	file_name[1] = '\0';
+
+	root = get_trustee_for_name(&trustee_name, ignore_case);
+	if (!root) return 0;
+
+	file_name[1] = tempchar;
+
+	len = strlen(file_name);
+
+	list_for_each_entry(r, &root->device_list, device_list) {
+		size_t this_len = strlen(r->name.filename);
+		if (this_len <= len) continue;
+		if (!strncmp(file_name, r->name.filename, len) &&
+			r->name.filename[len] != '\0')
+			return 1;
+	}
+
+	return 0;
+}
+
+/*
  * Return the mask for a file.
  *
  * WARNING!

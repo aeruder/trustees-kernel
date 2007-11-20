@@ -57,6 +57,7 @@ extern char *trustees_filename_for_dentry(struct dentry *dentry, int *d, int tru
 extern int trustees_funcs_init_globals(void);
 extern int trustees_funcs_cleanup_globals(void);
 
+int trustee_has_child(struct vfsmount *mnt, char *file_name);
 int trustee_perm(struct dentry *dentry, struct vfsmount *mnt,
 		 char *file_name, int unix_ret, int depth, int is_dir,
 		 struct trustee_hash_element **deepest);
