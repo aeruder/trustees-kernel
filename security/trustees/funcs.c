@@ -142,6 +142,23 @@ char *trustees_filename_for_dentry(struct dentry *dentry, int *d, int trunc)
 	return buffer;
 }
 
+/**
+ * Allocate memory using vmalloc and return a duplicate of the passed in string.
+ * Returns NULL if a problem occurs
+ */
+static char *vmalloc_strdup(const char *str, size_t len)
+{
+	char *r;
+
+	if (!str) return NULL;
+	len = strlen(str);
+	r = vmalloc(len + 1);
+	if (!r) return NULL;
+	memcpy(r, str, len + 1);
+
+	return r;
+}
+
 /*
  * Add a filesystem as a ignored-case dev.
  */
@@ -162,14 +179,13 @@ static inline void add_ic_dev(u32 dev, char *devname)
 		TS_ERR_MSG("No devname specified in add_ic_dev.\n");
 		return;
 	}
-	devname2 = vmalloc(dev_len + 1);
+
+	devname2 = vmalloc_strdup(devname, dev_len);
 	if (!devname2) {
 		TS_ERR_MSG
 		    ("Seems that we have ran out of memory adding ic dev!\n");
 		return;
 	}
-	memcpy(devname2, devname, dev_len);
-	devname2[dev_len] = '\0';
 
 	ic = vmalloc(sizeof(struct trustee_ic));
 	if (!ic) {
@@ -244,27 +260,22 @@ static int copy_trustee_name(struct trustee_name *dst, struct trustee_name *src)
 {
 	*dst = *src;
 	if (dst->filename) {
-		size_t len;
-		len = strlen(src->filename);
-		dst->filename = vmalloc(len + 1);
+		dst->filename = vmalloc_strdup(src->filename, strlen(src->filename));
 		if (!dst->filename) {
 			TS_ERR_MSG("Ran out of memory duplicating src->filename\n");
 			return 0;
 		}
-		memcpy(dst->filename, src->filename, len + 1);
 	}
 
 	if (dst->devname) {
-		size_t len;
-		len = strlen(src->devname);
-		dst->devname = vmalloc(len + 1);
+		dst->devname = vmalloc_strdup(src->devname, strlen(src->devname));
 		if (!dst->devname) {
 			TS_ERR_MSG("Ran out of memory duplicating src->devname\n");
 			vfree(dst->filename);
 			return 0;
 		}
-		memcpy(dst->devname, src->devname, len + 1);
 	}
+
 	return 1;
 }
 
@@ -674,27 +685,16 @@ static int prepare_trustee_name(u32 device, char *devname, char *filename, struc
 		return 0;
 	}
 
-	if (devl) {
-		devb = vmalloc(devl+1);
-		if (!devb) {
-			TS_ERR_MSG("Couldn't allocate mem for devb.\n");
-			return 0;
-		}
-
-		memcpy(devb, devname, devl);
-		devb[devl] = '\0';
+	devb = vmalloc_strdup(devname, devl);
+	if (!devb) {
+		TS_ERR_MSG("Couldn't allocate mem for devb.\n");
+		return 0;
 	}
 
-	if (filel) {
-		fileb = vmalloc(filel+1);
-		if (!fileb) {
-			TS_ERR_MSG("Couldn't allocate mem for fileb.\n");
-			vfree(devb);
-			return 0;
-		}
-
-		memcpy(fileb, filename, filel);
-		fileb[filel] = '\0';
+	fileb = vmalloc_strdup(filename, filel);
+	if (!fileb) {
+		TS_ERR_MSG("Couldn't allocate mem for fileb.\n");
+		return 0;
 	}
 
 	name->devname = devb;
