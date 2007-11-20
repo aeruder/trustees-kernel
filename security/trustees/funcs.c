@@ -43,6 +43,8 @@ static struct hlist_head *trustee_hash = NULL;
  * skip several of the levels in many case since we know it won't be any
  * deeper than this.
  *
+ * Kept up to date by calculate_deepest_level
+ *
  * /           => 0
  * /test       => 1
  * /test/blah  => 2
@@ -234,6 +236,38 @@ static inline void free_hash_element(struct trustee_hash_element *e)
 	vfree(e);
 }
 
+/**
+ * Copies from src to dest (duplicating the strings in the
+ * trustee_name structure.  Returns zero for unsuccesful.
+ */
+static int copy_trustee_name(struct trustee_name *dst, struct trustee_name *src)
+{
+	*dst = *src;
+	if (dst->filename) {
+		size_t len;
+		len = strlen(src->filename);
+		dst->filename = vmalloc(len + 1);
+		if (!dst->filename) {
+			TS_ERR_MSG("Ran out of memory duplicating src->filename\n");
+			return 0;
+		}
+		memcpy(dst->filename, src->filename, len + 1);
+	}
+
+	if (dst->devname) {
+		size_t len;
+		len = strlen(src->devname);
+		dst->devname = vmalloc(len + 1);
+		if (!dst->devname) {
+			TS_ERR_MSG("Ran out of memory duplicating src->devname\n");
+			vfree(dst->filename);
+			return 0;
+		}
+		memcpy(dst->devname, src->devname, len + 1);
+	}
+	return 1;
+}
+
 
 /*
  * hashing function researched by Karl Nelson <kenelson @ ece ucdavis edu>
@@ -310,25 +344,6 @@ static inline int trustee_name_cmp(const struct trustee_name *n1,
 }
 
 /*
- * Return the trustee element for a name.
- * This should be called with a lock on the trustee_hash (which should
- * not be released until you are done with the returned hash_element)!
- */
-static struct trustee_hash_element *get_trustee_for_name(const struct trustee_name *name,
-							 unsigned ignore_case)
-{
-	struct trustee_hash_element *item = NULL;
-	struct hlist_node *iter = NULL;
-
-	hlist_for_each_entry(item, iter, &trustee_hash[hash_slot(name)], hash_list) {
-		if (trustee_name_cmp(&item->name, name, ignore_case))
-			break;
-	}
-
-	return item;
-}
-
-/*
  * Calculate the deepest level.
  */
 static inline void calculate_deepest_level(const struct trustee_name *name)
@@ -350,19 +365,97 @@ static inline void calculate_deepest_level(const struct trustee_name *name)
 	if (level > deepest_level) deepest_level = level;
 }
 
-/* This function does not allocate memory for filename and devname.
- * It should be allocated at calling level
- *
- * Return the trustee element for a name if it exists, otherwise
- * allocate a new element and add to the hash and return that.
+/*
+ * Return the trustee element for a name.
+ * This should be called with a lock on the trustee_hash (which should
+ * not be released until you are done with the returned hash_element)!
  */
-static unsigned getallocate_trustee_for_name
-    (const struct trustee_name *name, struct trustee_permission acl, int *should_free)
+static struct trustee_hash_element *get_trustee_for_name(const struct trustee_name *name,
+							 unsigned ignore_case)
+{
+	struct trustee_hash_element *item = NULL;
+	struct hlist_node *iter = NULL;
+
+	hlist_for_each_entry(item, iter, &trustee_hash[hash_slot(name)], hash_list) {
+		if (trustee_name_cmp(&item->name, name, ignore_case))
+			break;
+	}
+
+	return item;
+}
+
+/**
+ * Add a new blank trustee to the hash.
+ *
+ * If this returns zero, then the adding failed and name should be freed
+ * (assuming must_copy is 0), otherwise assume we used its memory.
+ */
+static unsigned add_trustee(struct trustee_name *name, int must_copy) {
+	struct trustee_name newname;
+	struct trustee_name rootname;
+	unsigned is_root = 1;
+	unsigned r = 0;
+	struct trustee_hash_element *new;
+	struct trustee_hash_element *root;
+
+	if (!name->filename || !name->filename[0]) goto err0;
+
+	if (!copy_trustee_name(&rootname, name)) goto err0;
+	rootname.filename[1] = '\0';
+
+	if (strlen(name->filename) > 1 && strcmp(name->filename, "/")) {
+		add_trustee(&rootname, 1);
+		is_root = 0;
+	}
+
+	if (must_copy) {
+		if (!copy_trustee_name(&newname, name)) goto err1;
+	} else {
+		newname = *name;
+	}
+
+	new = vmalloc(sizeof(struct trustee_hash_element));
+	if (!new) goto err2;
+	new->name = newname;
+	INIT_HLIST_NODE(&new->hash_list);
+	INIT_LIST_HEAD(&new->perm_list);
+	INIT_LIST_HEAD(&new->device_list);
+
+	write_lock(&trustee_hash_lock);
+	if (get_trustee_for_name(&newname, 0)) goto err3;
+
+	if (is_root) {
+		root = NULL;
+	} else if (!(root = get_trustee_for_name(&rootname, 0))) {
+		TS_ERR_MSG("Root trustee disappeared on us!\n");
+		goto err3;
+	}
+	hlist_add_head(&new->hash_list, &trustee_hash[hash_slot(name)]);
+	if (!is_root) {
+		list_add_tail(&new->device_list, &root->device_list);
+	}
+	calculate_deepest_level(&newname);
+	TS_DEBUG_MSG("Created '%s' trustee\n", newname.filename);
+	r = 1;
+err3:
+	write_unlock(&trustee_hash_lock);
+	if (!r) vfree(new);
+err2:
+	if (must_copy && !r) free_trustee_name(&newname);
+err1:
+	free_trustee_name(&rootname);
+err0:
+	return r;
+}
+
+/**
+ * Add a permissions module to the trustee specified by name.
+ */
+static unsigned add_trustee_perm
+    (struct trustee_name *name, struct trustee_permission acl)
 {
 	struct trustee_hash_element *r = NULL;
 	struct trustee_permission_capsule *capsule;
-
-	*should_free = 1;
 
 	capsule = vmalloc(sizeof(struct trustee_permission_capsule));
 	if (!capsule) {
@@ -382,29 +475,10 @@ static unsigned getallocate_trustee_for_name
 		return 1;
 	}
 	write_unlock(&trustee_hash_lock);
+	TS_ERR_MSG("trustee disappeared under us while trying to add perms\n");
+	vfree(capsule);
 
-	r = vmalloc(sizeof(struct trustee_hash_element));
-	if (!r) {
-		TS_ERR_MSG("Can not allocate memory for trustee hash element\n");
-		return 0;
-	}
-
-	r->name = *name;
-	INIT_HLIST_NODE(&r->hash_list);
-
-	*should_free = 0;
-	calculate_deepest_level(name);
-
-	INIT_LIST_HEAD(&r->perm_list);
-	list_add_tail(&capsule->perm_list, &r->perm_list);
-
-	write_lock(&trustee_hash_lock);
-	hlist_add_head(&r->hash_list, &trustee_hash[hash_slot(name)]);
-	write_unlock(&trustee_hash_lock);
-
-	TS_DEBUG_MSG("Created new '%s' trustee\n", name->filename);
-
-	return 1;
+	return 0;
 }
 
 /*
@@ -639,8 +713,8 @@ extern int trustees_process_command(struct trustee_command command,
                                     size_t *argsize)
 {
 	int r = -ENOSYS;
+	int must_free = 0;
 	struct trustee_name name;
-	int should_free;
 
 	if ((current->euid != 0) && !capable(CAP_SYS_ADMIN)) {
 		r = -EACCES;
@@ -668,13 +742,15 @@ extern int trustees_process_command(struct trustee_command command,
 			r = -ENOMEM;
 			goto unlk;
 		}
-		if (!getallocate_trustee_for_name(&name, *(struct trustee_permission *)arg[1], &should_free))
+		if (!add_trustee(&name, 0)) {
+			must_free = 1;
+		}
+		if (!add_trustee_perm(&name, *(struct trustee_permission *)arg[1]))
 			r = -ENOMEM;
 		else
 			r = 0;
 
-		if (should_free)
-			free_trustee_name(&name);
+		if (must_free) free_trustee_name(&name);
 		break;
 	}
    unlk:

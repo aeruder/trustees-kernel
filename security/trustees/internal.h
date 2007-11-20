@@ -49,6 +49,7 @@ struct trustee_hash_element {
 	struct trustee_name name;
 	struct list_head perm_list;
 	struct hlist_node hash_list;
+	struct list_head device_list;
 };
 
 extern char *trustees_filename_for_dentry(struct dentry *dentry, int *d, int trunc);
