@@ -61,5 +61,5 @@ static void __exit trustees_exit(void)
 	trustees_funcs_cleanup_globals();
 }
 
-security_initcall(trustees_init);
+fs_initcall(trustees_init);
 module_exit(trustees_exit);
