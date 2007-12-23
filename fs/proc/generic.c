@@ -374,16 +374,9 @@ static int proc_delete_dentry(struct dentry * dentry)
 	return 1;
 }
 
-static int proc_revalidate_dentry(struct dentry *dentry, struct nameidata *nd)
-{
-	d_drop(dentry);
-	return 0;
-}
-
 static struct dentry_operations proc_dentry_operations =
 {
 	.d_delete	= proc_delete_dentry,
-	.d_revalidate	= proc_revalidate_dentry,
 };
 
 /*
@@ -595,6 +588,7 @@ static struct proc_dir_entry *proc_create(struct proc_dir_entry **parent,
 	ent->namelen = len;
 	ent->mode = mode;
 	ent->nlink = nlink;
+	atomic_set(&ent->count, 1);
 	ent->pde_users = 0;
 	spin_lock_init(&ent->pde_unload_lock);
 	ent->pde_unload_completion = NULL;
@@ -692,7 +686,6 @@ void free_proc_entry(struct proc_dir_entry *de)
 
 /*
  * Remove a /proc entry and free it if it's not currently in use.
- * If it is in use, we set the 'deleted' flag.
  */
 void remove_proc_entry(const char *name, struct proc_dir_entry *parent)
 {
@@ -741,13 +734,8 @@ continue_removing:
 			parent->nlink--;
 		de->nlink = 0;
 		WARN_ON(de->subdir);
-		if (!atomic_read(&de->count))
+		if (atomic_dec_and_test(&de->count))
 			free_proc_entry(de);
-		else {
-			de->deleted = 1;
-			printk("remove_proc_entry: %s/%s busy, count=%d\n",
-				parent->name, de->name, atomic_read(&de->count));
-		}
 		break;
 	}
 	spin_unlock(&proc_subdir_lock);
