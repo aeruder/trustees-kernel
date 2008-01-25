@@ -97,5 +97,4 @@ int trustees_init_fs(void);
 void trustees_deinit_fs(void);
 
 int trustees_init_security(void);
-void trustees_deinit_security(void);
 #endif				/* _LINUX_TRUSTEES_H */

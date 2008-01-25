@@ -421,13 +421,3 @@ int trustees_init_security(void)
 
 	return 0;
 }
-
-/* Unregister the security module
- */
-void trustees_deinit_security(void)
-{
-	if (unregister_security(&trustees_security_ops)) {
-		TS_ERR_MSG
-		    ("Failure unregistering security component...\n");
-	}
-}

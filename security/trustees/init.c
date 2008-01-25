@@ -54,12 +54,4 @@ static int __init trustees_init(void)
 	return 0;
 }
 
-static void __exit trustees_exit(void)
-{
-	trustees_deinit_security();
-	trustees_deinit_fs();
-	trustees_funcs_cleanup_globals();
-}
-
 fs_initcall(trustees_init);
-module_exit(trustees_exit);
