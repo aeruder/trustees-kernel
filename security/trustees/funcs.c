@@ -389,10 +389,10 @@ static struct trustee_hash_element *get_trustee_for_name(const struct trustee_na
 
 	hlist_for_each_entry(item, iter, &trustee_hash[hash_slot(name)], hash_list) {
 		if (trustee_name_cmp(&item->name, name, ignore_case))
-			break;
+			return item;
 	}
 
-	return item;
+	return NULL;
 }
 
 /**
