@@ -90,7 +90,7 @@ static inline struct vfsmount *find_inode_mnt(struct inode *inode,
 	struct vfsmount *mnt = NULL;
 
 	if (likely(nd))
-		return mntget(nd->mnt);
+		return mntget(nd->path.mnt);
 
 	/* Okay, we need to find the vfsmount by looking
 	 * at the namespace now.
@@ -125,7 +125,7 @@ static inline struct dentry *find_inode_dentry(struct inode *inode,
 	struct dentry *dentry;
 
 	if (likely(nd))
-		return dget(nd->dentry);
+		return dget(nd->path.dentry);
 
 	dentry = d_find_alias(inode);
 
