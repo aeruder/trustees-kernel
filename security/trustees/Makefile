@@ -3,6 +3,5 @@ ifeq ($(CONFIG_SECURITY_TRUSTEES_DEBUG),y)
 endif
 
 obj-$(CONFIG_SECURITY_TRUSTEES) := trustees.o
-trustees-objs := \
-	security.o fs.o \
-	init.o funcs.o ../commoncap.o
+
+trustees-y := security.o fs.o init.o funcs.o

@@ -329,8 +329,8 @@ static inline unsigned int hash_slot(const struct trustee_name *name)
 /*
  * Compare two devices.  Return 1 if they are equal otherwise return 0
  */
-static inline int trustee_dev_cmp(dev_t dev1, dev_t dev2, char *devname1,
-				  char *devname2)
+static inline int trustee_dev_cmp(dev_t dev1, dev_t dev2, const char *devname1,
+				  const char *devname2)
 {
 	if ((MAJOR(dev1) == 0) && (MAJOR(dev2) == 0))
 		return (strcmp(devname1, devname2) == 0);
@@ -359,8 +359,8 @@ static inline int trustee_name_cmp(const struct trustee_name *n1,
  */
 static inline void calculate_deepest_level(const struct trustee_name *name)
 {
-	char *fn = name->filename;
-	char *x;
+	const char *fn = name->filename;
+	const char *x;
 	int level = 0;
 
 	for (x = fn; *x; ++x) {

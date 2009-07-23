@@ -42,8 +42,7 @@
 #include "internal.h"
 
 static int trustees_capable(struct task_struct *tsk, int cap);
-static int trustees_inode_permission(struct inode *inode,
-				     int mask, struct nameidata *nd);
+static int trustees_inode_permission(struct inode *inode, int mask);
 
 /* Checks if user has access to the inode due to root status
  */
@@ -83,14 +82,10 @@ static inline int has_unix_perm(struct inode *inode, int mask)
 }
 
 /* Find a vfsmount given an inode */
-static inline struct vfsmount *find_inode_mnt(struct inode *inode,
-					      struct nameidata *nd)
+static inline struct vfsmount *find_inode_mnt(struct inode *inode)
 {
 	struct mnt_namespace *ns = NULL;
 	struct vfsmount *mnt = NULL;
-
-	if (likely(nd))
-		return mntget(nd->path.mnt);
 
 	/* Okay, we need to find the vfsmount by looking
 	 * at the namespace now.
@@ -119,13 +114,9 @@ static inline struct vfsmount *find_inode_mnt(struct inode *inode,
 }
 
 /* Find a dentry given an inode */
-static inline struct dentry *find_inode_dentry(struct inode *inode,
-					       struct nameidata *nd)
+static inline struct dentry *find_inode_dentry(struct inode *inode)
 {
 	struct dentry *dentry;
-
-	if (likely(nd))
-		return dget(nd->path.dentry);
 
 	dentry = d_find_alias(inode);
 
@@ -148,7 +139,7 @@ static inline int have_same_trustees(struct dentry *old_dentry,
 	int is_dir;
 	int ret = 0;
 
-	mnt = find_inode_mnt(old_dentry->d_inode, NULL);
+	mnt = find_inode_mnt(old_dentry->d_inode);
 	if (unlikely(!mnt)) {
 		TS_ERR_MSG("inode does not have a mnt!\n");
 		return 0;
@@ -207,28 +198,6 @@ struct security_operations trustees_security_ops = {
 	.inode_permission = trustees_inode_permission,
 	.inode_link = trustees_inode_link,
 	.inode_rename = trustees_inode_rename,
-
-	.ptrace =			cap_ptrace,
-	.capget =			cap_capget,
-	.capset_check =			cap_capset_check,
-	.capset_set =			cap_capset_set,
-	.settime =			cap_settime,
-	.netlink_send =			cap_netlink_send,
-	.netlink_recv =			cap_netlink_recv,
-
-	.bprm_apply_creds =		cap_bprm_apply_creds,
-	.bprm_set_security =		cap_bprm_set_security,
-	.bprm_secureexec =		cap_bprm_secureexec,
-
-	.inode_setxattr =		cap_inode_setxattr,
-	.inode_removexattr =		cap_inode_removexattr,
-
-	.task_post_setuid =		cap_task_post_setuid,
-	.task_reparent_to_init =	cap_task_reparent_to_init,
-
-	.syslog =                       cap_syslog,
-
-	.vm_enough_memory =             cap_vm_enough_memory
 };
 
 #define ALL_MAYS (MAY_WRITE | MAY_EXEC | MAY_READ)
@@ -254,8 +223,7 @@ static int inline trustee_mask_to_normal_mask(int mask, int isdir)
  * otherwise it first checks for any errors finding the dentry/vfsmount for
  * the inode, and then it looks up the dentry in the trustees hash.
  */
-static int trustees_inode_permission(struct inode *inode,
-				     int mask, struct nameidata *nd)
+static int trustees_inode_permission(struct inode *inode, int mask)
 {
 	struct dentry *dentry;
 	struct vfsmount *mnt;
@@ -272,13 +240,13 @@ static int trustees_inode_permission(struct inode *inode,
 
 	ret = has_unix_perm(inode, mask);
 
-	mnt = find_inode_mnt(inode, nd);
+	mnt = find_inode_mnt(inode);
 	if (unlikely(!mnt)) {
 		TS_ERR_MSG("inode does not have a mnt!\n");
 		return -EACCES;	/* has_unix_perm(inode, mask); */
 	}
 
-	dentry = find_inode_dentry(inode, nd);
+	dentry = find_inode_dentry(inode);
 	if (unlikely(!dentry)) {
 		/* Most of the time when this happens, it is the /
 		 * If it is not, we need to dump as much information
@@ -410,10 +378,6 @@ static int trustees_capable(struct task_struct *tsk, int cap)
  */
 int trustees_init_security(void)
 {
-	/* FIXME: add in secondary module register
-	 * not worry about it now since I have better
-	 * things to worry about. Comprende?
-	 */
 	if (register_security(&trustees_security_ops)) {
 		TS_ERR_MSG("Could not register security component\n");
 		return -EINVAL;

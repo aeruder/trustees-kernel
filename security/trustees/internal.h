@@ -32,7 +32,7 @@ struct trustee_ic {
 struct trustee_name {
 	dev_t dev;
 	char *filename;
-	char *devname;		/* ONLY if MAJOR(dev)==0 */
+	const char *devname;		/* ONLY if MAJOR(dev)==0 */
 };
 
 struct trustee_permission_capsule {
