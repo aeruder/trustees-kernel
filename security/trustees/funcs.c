@@ -27,6 +27,7 @@
 #include <linux/list.h>
 #include <linux/vmalloc.h>
 #include <linux/ctype.h>
+#include <linux/cred.h>
 
 #include "internal.h"
 
@@ -519,7 +520,7 @@ static int get_trustee_mask_for_name(struct trustee_name *name,
 			element = NULL;
 		}
 		appl = ((!(l->permission.mask & TRUSTEE_IS_GROUP_MASK))
-			&& (current->fsuid == l->permission.u.uid))
+			&& (current_fsuid() == l->permission.u.uid))
 		    || (((l->permission.mask & TRUSTEE_IS_GROUP_MASK))
 			&& (in_group_p(l->permission.u.gid)))
 		    || (l->permission.mask & TRUSTEE_ALL_MASK);
@@ -767,7 +768,7 @@ extern int trustees_process_command(struct trustee_command command,
 	int must_free = 0;
 	struct trustee_name name;
 
-	if ((current->euid != 0) && !capable(CAP_SYS_ADMIN)) {
+	if ((current_euid() != 0) && !capable(CAP_SYS_ADMIN)) {
 		r = -EACCES;
 		return r;
 	}

@@ -37,11 +37,14 @@
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #include <linux/nsproxy.h>
+#include <linux/cred.h>
 #include <linux/mnt_namespace.h>
 
 #include "internal.h"
 
-static int trustees_capable(struct task_struct *tsk, int cap);
+static int trustees_capable(struct task_struct *tsk, const struct cred *cred,
+			    int cap,
+			    int audit);
 static int trustees_inode_permission(struct inode *inode, int mask);
 
 /* Checks if user has access to the inode due to root status
@@ -51,7 +54,7 @@ static inline int has_root_perm(struct inode *inode, int mask)
 	umode_t mode = inode->i_mode;
 
 	if (!(mask & MAY_EXEC) || (mode & S_IXUGO) || S_ISDIR(mode))
-		if (current->fsuid == 0)
+		if (current_fsuid() == 0)
 			return 0;
 
 	return -EACCES;
@@ -70,7 +73,7 @@ static inline int has_unix_perm(struct inode *inode, int mask)
 	umode_t mode = inode->i_mode;
 	mask &= ~MAY_APPEND;
 
-	if (current->fsuid == inode->i_uid)
+	if (current_fsuid() == inode->i_uid)
 		mode >>= 6;
 	else if (in_group_p(inode->i_gid))
 		mode >>= 3;
@@ -330,7 +333,7 @@ static int trustees_inode_link(struct dentry *old_dentry,
 			       struct inode *dir,
 			       struct dentry *new_dentry)
 {
-	if (current->fsuid == 0)
+	if (current_fsuid() == 0)
 		return 0;
 
 	if (have_same_trustees(old_dentry, new_dentry))
@@ -355,7 +358,7 @@ static int trustees_inode_rename(struct inode *old_dir,
 				 struct inode *new_dir,
 				 struct dentry *new_dentry)
 {
-	if (current->fsuid == 0)
+	if (current_fsuid() == 0)
 		return 0;
 
 	if (have_same_trustees(old_dentry, new_dentry)) return 0;
@@ -366,12 +369,14 @@ static int trustees_inode_rename(struct inode *old_dir,
 /* Return CAP_DAC_OVERRIDE on everything.  We want to handle our own
  * permissions (overriding those normally allowed by unix permissions)
  */
-static int trustees_capable(struct task_struct *tsk, int cap)
+static int trustees_capable(struct task_struct *tsk, const struct cred *cred,
+			    int cap,
+			    int audit)
 {
 	if (cap == CAP_DAC_OVERRIDE)
 		return 0;
 
-	return cap_capable(tsk, cap);
+	return cap_capable(tsk, cred, cap, audit);
 }
 
 /* Register the security module
