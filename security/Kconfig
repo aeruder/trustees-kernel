@@ -105,7 +105,7 @@ config SECURITY_ROOTPLUG
 
 config SECURITY_TRUSTEES
 	bool "Linux Trustees ACLs"
-	depends on SECURITY
+	depends on SECURITY && SECURITYFS
 	help
 	  Implements a system similar to Netware ACLs.  Trustees
 	  allows a global configuration of recursive ACLs via a
