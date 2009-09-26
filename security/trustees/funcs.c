@@ -562,6 +562,10 @@ int trustee_has_child(struct vfsmount *mnt, char *file_name)
 
 	if (!file_name || !*file_name) return 0;
 
+	trustee_name.dev = mnt->mnt_sb->s_dev;
+	trustee_name.devname = mnt->mnt_devname;
+	trustee_name.filename = file_name;
+
 	list_for_each_entry(iter, &trustee_ic_list, ic_list) {
 		if (trustee_dev_cmp
 		    (iter->dev, trustee_name.dev, iter->devname,
@@ -571,9 +575,6 @@ int trustee_has_child(struct vfsmount *mnt, char *file_name)
 		}
 	}
 
-	trustee_name.dev = mnt->mnt_sb->s_dev;
-	trustee_name.devname = mnt->mnt_devname;
-	trustee_name.filename = file_name;
 	tempchar = file_name[1];
 	file_name[1] = '\0';
 
@@ -601,7 +602,7 @@ int trustee_has_child(struct vfsmount *mnt, char *file_name)
  * WARNING!
  * This function requires that you lock/unlock the trustees_hash_lock
  */
-int trustee_perm(struct dentry *dentry, struct vfsmount *mnt,
+int trustee_perm(struct path *path,
 		 char *file_name, int unix_ret, int depth, int is_dir,
 		 struct trustee_hash_element **deepest)
 {
@@ -614,8 +615,8 @@ int trustee_perm(struct dentry *dentry, struct vfsmount *mnt,
 	struct trustee_ic *iter;
 	unsigned ignore_case = 0;
 
-	trustee_name.dev = mnt->mnt_sb->s_dev;
-	trustee_name.devname = mnt->mnt_devname;
+	trustee_name.dev = path->mnt->mnt_sb->s_dev;
+	trustee_name.devname = path->mnt->mnt_devname;
 	trustee_name.filename = file_name;
 
 	list_for_each_entry(iter, &trustee_ic_list, ic_list) {
