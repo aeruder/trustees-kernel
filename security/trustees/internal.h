@@ -20,6 +20,7 @@
 #include <linux/list.h>
 #include <linux/version.h>
 #include <linux/trustees.h>
+#include <linux/path.h>
 
 #define TRUSTEE_DEFAULT_MASK TRUSTEE_USE_UNIX_MASK
 
@@ -58,7 +59,7 @@ extern int trustees_funcs_init_globals(void);
 extern int trustees_funcs_cleanup_globals(void);
 
 int trustee_has_child(struct vfsmount *mnt, char *file_name);
-int trustee_perm(struct dentry *dentry, struct vfsmount *mnt,
+int trustee_perm(struct path *path,
 		 char *file_name, int unix_ret, int depth, int is_dir,
 		 struct trustee_hash_element **deepest);
 
