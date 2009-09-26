@@ -90,6 +90,11 @@ static inline struct vfsmount *find_inode_mnt(struct inode *inode)
 	struct mnt_namespace *ns = NULL;
 	struct vfsmount *mnt = NULL;
 
+	if (!inode->i_sb) {
+		TS_ERR_MSG("Inode without a i_sb entry?");
+		return NULL;
+	}
+
 	/* Okay, we need to find the vfsmount by looking
 	 * at the namespace now.
 	 */
@@ -101,10 +106,11 @@ static inline struct vfsmount *find_inode_mnt(struct inode *inode)
 	}
 	task_unlock(current);
 
-	if (!ns) return NULL;
+	if (!ns)
+		return NULL;
 
 	list_for_each_entry(mnt, &ns->list, mnt_list) {
-		if (mnt->mnt_sb == inode->i_sb) {
+		if (mnt->mnt_sb == inode->i_sb && mnt->mnt_devname) {
 			mntget(mnt);
 			goto out;
 		}
@@ -126,65 +132,103 @@ static inline struct dentry *find_inode_dentry(struct inode *inode)
 	return dentry;
 }
 
+/* Find a path (dentry/vfsmount pair) given an inode
+ */
+static inline int find_inode_path(struct inode *inode, struct path *path)
+{
+	int ret = 0;
+
+	path->dentry = NULL;
+	path->mnt = NULL;
+
+	path->mnt = find_inode_mnt(inode);
+	if (unlikely(!path->mnt)) {
+		TS_ERR_MSG("inode does not have a mnt!\n");
+		goto error_out;
+	}
+
+	path->dentry = find_inode_dentry(inode);
+	if (unlikely(!path->dentry)) {
+		/* Most of the time when this happens, it is the /
+		 * If it is not, we need to dump as much information
+		 * as possible on it and dump it to logs, because
+		 * I'm really not sure how it happens.
+		 */
+		if (path->mnt->mnt_root && inode == path->mnt->mnt_root->d_inode) {
+			path->dentry = dget(path->mnt->mnt_root);
+		} else {
+			/* I have seen this happen once but I did not have any
+			 * way to see what caused it.  I am gonna dump_stack
+			 * until I have that happen again to see if the cause
+			 * is something that I need to worry about.
+			 */
+			dump_stack();	/* DEBUG FIXME */
+			TS_ERR_MSG("Inode number: %ld\n", inode->i_ino);
+			TS_ERR_MSG("dentry does not exist!\n");
+			goto error_mnt_out;
+		}
+	}
+
+	goto out;
+
+error_mnt_out:
+	mntput(path->mnt);
+	path->mnt = NULL;
+
+error_out:
+	ret = 1;
+
+out:
+	return ret;
+}
+
 /*
  * Return 1 if they are under the same set of trustees
  * otherwise return 0.  In the case that we are handling
  * a directory, we also check to see if there are subdirectories
  * with trustees.
  */
-static inline int have_same_trustees(struct dentry *old_dentry,
-				     struct dentry *new_dentry)
+static inline int have_same_trustees_rename(struct path *path1, struct path *path2)
 {
-	struct vfsmount *mnt;
-	char *old_file_name, *new_file_name;
-	int old_depth, new_depth;
-	struct trustee_hash_element *old_deep, *new_deep;
+	char *filename1, *filename2;
+	int depth1, depth2;
+	struct trustee_hash_element *deep1, *deep2;
 	int is_dir;
 	int ret = 0;
 
-	mnt = find_inode_mnt(old_dentry->d_inode);
-	if (unlikely(!mnt)) {
-		TS_ERR_MSG("inode does not have a mnt!\n");
-		return 0;
-	}
-
-	old_file_name = trustees_filename_for_dentry(old_dentry, &old_depth, 1);
-	if (!old_file_name) {
+	filename1 = trustees_filename_for_dentry(path1->dentry, &depth1, 1);
+	if (!filename1) {
 		TS_ERR_MSG("Couldn't allocate filename\n");
-		goto out_old_dentry;
+		goto out;
 	}
 
-	new_file_name = trustees_filename_for_dentry(new_dentry, &new_depth, 1);
-	if (!new_file_name) {
+	filename2 = trustees_filename_for_dentry(path2->dentry, &depth2, 1);
+	if (!filename2) {
 		TS_ERR_MSG("Couldn't allocate filename\n");
-		goto out_new_dentry;
+		goto out_file_name;
 	}
 
-	is_dir = S_ISDIR(old_dentry->d_inode->i_mode);
+	is_dir = S_ISDIR(path1->dentry->d_inode->i_mode);
 
 	read_lock(&trustee_hash_lock);
-	trustee_perm(old_dentry, mnt, old_file_name, ret, old_depth, is_dir,
-		     &old_deep);
-	trustee_perm(new_dentry, mnt, new_file_name, ret, new_depth, is_dir,
-		     &new_deep);
-	if (old_deep == new_deep) {
+	trustee_perm(path1, filename1, ret, depth1, is_dir, &deep1);
+	trustee_perm(path2, filename2, ret, depth2, is_dir, &deep2);
+	if (deep1 == deep2) {
 		ret = 1;
 		if (is_dir) {
-			if (trustee_has_child(mnt, old_file_name) ||
-				trustee_has_child(mnt, new_file_name)) ret = 0;
+			if (trustee_has_child(path1->mnt, filename1) ||
+				trustee_has_child(path2->mnt, filename2)) ret = 0;
 		}
 	}
 	read_unlock(&trustee_hash_lock);
 
-	kfree(new_file_name);
-out_new_dentry:
-	kfree(old_file_name);
-out_old_dentry:
-	mntput(mnt);
+	kfree(filename2);
+  out_file_name:
+	kfree(filename1);
+  out:
 
 	return ret;
 }
-
 
 static int trustees_inode_rename(struct inode *old_dir,
 				 struct dentry *old_dentry,
@@ -200,7 +244,7 @@ struct security_operations trustees_security_ops = {
 	.capable = trustees_capable,
 	.inode_permission = trustees_inode_permission,
 	.inode_link = trustees_inode_link,
-	.inode_rename = trustees_inode_rename,
+	.inode_rename = trustees_inode_rename
 };
 
 #define ALL_MAYS (MAY_WRITE | MAY_EXEC | MAY_READ)
@@ -228,8 +272,7 @@ static int inline trustee_mask_to_normal_mask(int mask, int isdir)
  */
 static int trustees_inode_permission(struct inode *inode, int mask)
 {
-	struct dentry *dentry;
-	struct vfsmount *mnt;
+	struct path path;
 	char *file_name;
 	int is_dir;
 	int ret;
@@ -243,44 +286,21 @@ static int trustees_inode_permission(struct inode *inode, int mask)
 
 	ret = has_unix_perm(inode, mask);
 
-	mnt = find_inode_mnt(inode);
-	if (unlikely(!mnt)) {
-		TS_ERR_MSG("inode does not have a mnt!\n");
-		return -EACCES;	/* has_unix_perm(inode, mask); */
+	if (find_inode_path(inode, &path)) {
+		return -EACCES;
 	}
 
-	dentry = find_inode_dentry(inode);
-	if (unlikely(!dentry)) {
-		/* Most of the time when this happens, it is the /
-		 * If it is not, we need to dump as much information
-		 * as possible on it and dump it to logs, because
-		 * I'm really not sure how it happens.
-		 */
-		if (inode == mnt->mnt_root->d_inode) {
-			dentry = dget(mnt->mnt_root);
-		} else {
-			/* I have seen this happen once but I did not have any
-			 * way to see what caused it.  I am gonna dump_stack
-			 * until I have that happen again to see if the cause
-			 * is something that I need to worry about.
-			 */
-			dump_stack();	/* DEBUG FIXME */
-			TS_ERR_MSG("Inode number: %ld\n", inode->i_ino);
-			TS_ERR_MSG("dentry does not exist!\n");
-			goto out_mnt;
-		}
-	}
-	file_name = trustees_filename_for_dentry(dentry, &depth, 1);
+	file_name = trustees_filename_for_dentry(path.dentry, &depth, 1);
 	if (!file_name) {
 		TS_ERR_MSG("Couldn't allocate filename\n");
 		ret = -EACCES;
-		goto out_dentry;
+		goto out_path;
 	}
 
 	is_dir = S_ISDIR(inode->i_mode);
 
 	read_lock(&trustee_hash_lock);
-	amask = trustee_perm(dentry, mnt, file_name, ret, depth, is_dir,
+	amask = trustee_perm(&path, file_name, ret, depth, is_dir,
 			     (struct trustee_hash_element **)NULL);
 	read_unlock(&trustee_hash_lock);
 	dmask = amask >> TRUSTEE_NUM_ACL_BITS;
@@ -313,12 +333,10 @@ static int trustees_inode_permission(struct inode *inode, int mask)
 	} else
 		ret = -EACCES;
 
-      out:
+out:
 	kfree(file_name);
-      out_dentry:
-	dput(dentry);
-      out_mnt:
-	mntput(mnt);
+out_path:
+	path_put(&path);
 
 	return ret;
 }
@@ -333,13 +351,25 @@ static int trustees_inode_link(struct dentry *old_dentry,
 			       struct inode *dir,
 			       struct dentry *new_dentry)
 {
+	int ret = -EXDEV;
+	struct path path1;
+	struct path path2;
+
 	if (current_fsuid() == 0)
 		return 0;
 
-	if (have_same_trustees(old_dentry, new_dentry))
-		return 0;
+	path1.dentry = dget(old_dentry);
+	path1.mnt = find_inode_mnt(old_dentry->d_inode);
+	path2.dentry = dget(new_dentry);
+	path2.mnt = mntget(path1.mnt);
 
-	return -EXDEV;
+	if (have_same_trustees_rename(&path1, &path2))
+		ret = 0;
+
+	path_put(&path1);
+	path_put(&path2);
+
+	return ret;
 }
 
 /* We have a few renames to protect against:
@@ -358,12 +388,7 @@ static int trustees_inode_rename(struct inode *old_dir,
 				 struct inode *new_dir,
 				 struct dentry *new_dentry)
 {
-	if (current_fsuid() == 0)
-		return 0;
-
-	if (have_same_trustees(old_dentry, new_dentry)) return 0;
-
-	return -EXDEV;
+	return trustees_inode_link(old_dentry, new_dir, new_dentry);
 }
 
 /* Return CAP_DAC_OVERRIDE on everything.  We want to handle our own
